@@ -5,6 +5,7 @@ import {
   loadCheckout,
   saveCheckout,
   CheckoutForm,
+  normalizeDadataAddress,
 } from "./api.js";
 
 export async function getDeliveryOptions() {
@@ -62,16 +63,37 @@ export async function getPaymentMethods() {
 
 export async function searchAddress(query: string) {
   // The site uses dadata via /search endpoint
-  return await api("search", { method: "POST", body: { query } });
+  return await api("search", { method: "POST", body: { value: query, type: "address" } });
 }
 
 export async function getCityByFias(city_fias: string) {
   return await api("settlement/dadata", { query: { city_fias } });
 }
 
+/** Saved addresses used by the authenticated web checkout (GET only). */
+export async function listDeliveryAddresses() {
+  return await api("user/addresses", { query: { from: "basket" } });
+}
+
 export async function setCheckoutForm(patch: Partial<CheckoutForm>) {
   const cur = loadCheckout();
   const next = { ...cur, ...patch };
+  if (patch.address_id != null) {
+    const response: any = await listDeliveryAddresses();
+    if (!Array.isArray(response?.data))
+      throw new Error("Не удалось прочитать адресную книгу аккаунта. Форма не изменена.");
+    const selected = response.data.find((address: any) => address.id === patch.address_id);
+    if (!selected)
+      throw new Error("address_id отсутствует в адресной книге аккаунта. Используйте list_delivery_addresses; форма не изменена.");
+    // The official web checkout hydrates these fields from the selected saved address.
+    next.address = selected.address ?? null;
+    next.dadata_address = selected.dadata_address ?? null;
+    next.postcode = selected.postcode ?? null;
+    next.shipping_flat = patch.shipping_flat !== undefined
+      ? patch.shipping_flat
+      : selected.flat ?? null;
+  }
+  next.dadata_address = normalizeDadataAddress(next.dadata_address);
   saveCheckout(next);
   return next;
 }
@@ -114,13 +136,14 @@ export async function placeOrder(opts: { confirm?: boolean } = {}) {
   const missing: string[] = [];
   if (!form.delivery_type) missing.push("delivery_type");
   if (!form.payment_code) missing.push("payment_code");
+  const address = normalizeDadataAddress(form.dadata_address);
   if (
-    !form.address &&
-    !form.dadata_address &&
-    !form.address_id &&
-    form.delivery_type !== "pvz"
+    !form.address_id && (
+      !address || typeof address !== "object" ||
+      Array.isArray(address) || Object.keys(address).length === 0
+    )
   )
-    missing.push("address|dadata_address|address_id");
+    missing.push("dadata_address|address_id");
   if (form.delivery_type === "pvz" && !form.pvz_id) missing.push("pvz_id");
 
   const payload = buildCartPayload(form, items);
@@ -134,7 +157,7 @@ export async function placeOrder(opts: { confirm?: boolean } = {}) {
       message:
         missing.length > 0
           ? `⚠️ Не заполнены поля: ${missing.join(", ")}. Используйте set_checkout_form. Повторите с confirm=true для оформления.`
-          : "Готово к отправке. Вызовите place_order с confirm=true для подтверждения.",
+          : "Локальные поля заполнены; корзина пересчитана. Полная проверка магазина выполняется только при checkout. Вызовите place_order с confirm=true после подтверждения пользователем.",
       missing_fields: missing,
       preview: preview?.data ?? preview,
       payload_will_be_sent: payload,
@@ -169,7 +192,11 @@ export async function placeOrder(opts: { confirm?: boolean } = {}) {
         status = resp?.data || resp;
         if (!status?.pending) break;
       } catch (err: any) {
-        status = { error: err?.message || String(err) };
+        status = {
+          ...(err?.data || {}),
+          error: err?.message || String(err),
+          http_status: err?.status || null,
+        };
         break;
       }
     }
@@ -185,11 +212,14 @@ export async function placeOrder(opts: { confirm?: boolean } = {}) {
 
   return {
     submitted: true,
+    order_created: status?.checkout_status === "succeeded" && !!status?.order_id,
     dry_run: false,
+    checkout_request_id: requestId,
     order_id: status?.order_id || null,
     price: status?.price || null,
     checkout_status: status?.checkout_status || null,
     success_url: status?.url || null,
+    validation_errors: status?.errors || null,
     raw: status,
   };
 }

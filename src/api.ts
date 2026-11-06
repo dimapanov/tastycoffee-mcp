@@ -125,6 +125,17 @@ export function mergeCheckoutUser(form: CheckoutForm): CheckoutUser | null {
   return Object.keys(u).length ? u : null;
 }
 
+/** Dadata suggestions wrap the address fields in `data`; checkout expects those fields directly. */
+export function normalizeDadataAddress(value: any): any {
+  if (
+    value && typeof value === "object" && !Array.isArray(value) &&
+    value.data && typeof value.data === "object" && !Array.isArray(value.data)
+  ) {
+    return value.data;
+  }
+  return value ?? null;
+}
+
 export function buildCartPayload(
   form: CheckoutForm,
   items: CartItem[],
@@ -136,7 +147,7 @@ export function buildCartPayload(
       items: encodeItems(items),
       address_id: form.address_id ?? null,
       address: form.address ?? null,
-      dadata_address: form.dadata_address ?? null,
+      dadata_address: normalizeDadataAddress(form.dadata_address),
       delivery_type: form.delivery_type ?? null,
       payment_code: form.payment_code ?? null,
       postcode: form.postcode ?? null,

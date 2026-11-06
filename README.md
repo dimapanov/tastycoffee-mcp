@@ -19,13 +19,14 @@ MCP-сервер для оформления заказов на [shop.tastycoff
 **Оформление заказа**
 
 - `search_address` (dadata), `get_delivery_options`, `get_payment_methods`.
+- `list_delivery_addresses` — сохранённые адреса авторизованного аккаунта. `set_checkout_form { address_id }` загружает адресные поля выбранной записи, как веб-клиент магазина.
 - `list_pvz_points { shipping_code, query }` — список ПВЗ для тарифа (`dpd.2`, `cdek.2`, `pochta.1`…), фильтр по адресу.
 - `set_checkout_form` (адрес, доставка, оплата, контакты — можно плоскими `full_name`/`phone`/`email` или объектом `user`; телефон нормализуется к 11 цифрам без `+`).
 - `apply_coupon`, `apply_voucher`.
 - `place_order` — **двухфазный**: по умолчанию dry-run с превью; реальная отправка по `confirm: true`. После отправки автоматически опрашивает `checkout/{id}/status` до `succeeded`/`failed`.
 - `checkout_status` — ручной запрос статуса, если потребуется.
 
-Всего **29 инструментов**.
+Всего **30 инструментов**.
 
 ## Установка
 
@@ -35,6 +36,9 @@ cd tastycoffee-mcp
 npm install
 npm run build
 ```
+
+Автономные тесты: `npm test`. Они используют временное состояние и поддельные
+ответы `fetch`, не обращаются к магазину и не создают реальные заказы.
 
 ## Подключение к Claude Desktop / Cursor
 
@@ -57,11 +61,32 @@ npm run build
 2. `complete_phone_login { code: "XXXX" }` → JWT сохранён.
 3. `search_products { query: "эфиопия" }` или `list_products { type: "popular" }`.
 4. `add_to_cart { product: "/coffee/<slug>", weight: "1000 г", grind: "в зёрнах" }`.
-5. Для курьерской доставки — `search_address`, затем `set_checkout_form { dadata_address, delivery_type: "courier", ... }`.
-   Для ПВЗ — `list_pvz_points { shipping_code: "dpd.2", query: "<улица>" }`, затем `set_checkout_form { delivery_type: "pvz", shipping_code: "dpd.2", pvz_id, ... }`.
+5. В авторизованном аккаунте — `list_delivery_addresses`, затем
+   `set_checkout_form { address_id: <id выбранного адреса> }`. Клиент загрузит
+   `address`, `dadata_address`, `postcode` и квартиру из этой записи; неизвестный
+   `address_id` отклоняется без изменения формы.
+   Для адреса из поиска — `search_address`, затем `set_checkout_form { dadata_address, ... }`;
+   можно передать всю Dadata-подсказку или её `.data`: в API уйдёт объект данных.
+   Для курьера задайте `delivery_type: "courier"` и тариф доставки.
+   Для ПВЗ — `list_pvz_points { shipping_code: "dpd.2", query: "<улица>" }`, затем
+   `set_checkout_form { delivery_type: "pvz", shipping_code: "dpd.2", pvz_id, ... }`.
+   Для ПВЗ тоже нужен структурированный адрес или `address_id`: строка адреса
+   пункта выдачи сама по себе не заменяет адресные данные checkout.
 6. `set_checkout_form { payment_code: "cod", full_name, phone, email }`.
 7. `place_order {}` — dry-run: видно итог, доставку, недостающие поля.
 8. `place_order { confirm: true }` — отправка через `POST /api/v2/checkout` + автоматический polling статуса.
+
+Dry-run проверяет локальные обязательные поля и пересчитывает корзину. Полная
+проверка checkout выполняется магазином только при отправке: успешное превью
+само по себе не гарантирует оформление.
+
+В результате отправки `submitted` означает отправленный checkout-запрос,
+а `order_created` — ответ `succeeded` с `order_id`. При ошибке асинхронной проверки
+сохраняются `checkout_status`, `checkout_request_id` и `validation_errors`
+(например, `cart.dadata_address`). `success_url` — возвращённая магазином ссылка
+для перехода, в том числе на оплату; получение этой ссылки не означает, что заказ
+оплачен. Не повторяйте отправку автоматически после неоднозначного результата:
+сначала проверьте `checkout_status` по `checkout_request_id`.
 
 ## Переменные окружения
 
