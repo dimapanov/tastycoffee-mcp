@@ -38,6 +38,7 @@ import {
   getPaymentMethods,
   searchAddress,
   getCityByFias,
+  listDeliveryAddresses,
   setCheckoutForm,
   getCheckoutForm,
   clearCheckoutForm,
@@ -362,6 +363,14 @@ const tools: {
   },
 
   // ============= Checkout =============
+  {
+    name: "list_delivery_addresses",
+    description:
+      "Сохранённые адреса авторизованного аккаунта для checkout. Только чтение. Выберите подходящий address_id и передайте в set_checkout_form: клиент подставит адресные поля как сайт. ПВЗ выбирается отдельно через shipping_code/pvz_id.",
+    inputSchema: { type: "object", properties: {} },
+    zod: z.object({}).strict(),
+    handler: async () => await listDeliveryAddresses(),
+  },
   {
     name: "search_address",
     description:
